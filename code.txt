@@ -1,0 +1,22 @@
+import os
+from langchain.chat_models import AzureChatOpenAI
+from langchain.schema import HumanMessage
+
+# 设置 Azure OpenAI 的 API 密钥和终结点
+os.environ["AZURE_OPENAI_API_KEY"] = "your_api_key"
+os.environ["AZURE_OPENAI_ENDPOINT"] = "https://your-endpoint.openai.azure.com/"
+os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"] = "your_deployment_name"  # 模型部署名称
+
+# 初始化 AzureChatOpenAI
+chat_model = AzureChatOpenAI(
+    openai_api_base=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    openai_api_version="2023-05-15",  # 确保使用最新版本
+    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+)
+
+# 发送消息并获取响应
+response = chat_model([HumanMessage(content="Hello, how can I assist you today?")])
+
+# 打印响应
+print(response.content)
