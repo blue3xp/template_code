@@ -1,22 +1,72 @@
-import os
-from langchain.chat_models import AzureChatOpenAI
-from langchain.schema import HumanMessage
+import requests
+from typing import List
+from langchain.embeddings.base import Embeddings
 
-# 设置 Azure OpenAI 的 API 密钥和终结点
-os.environ["AZURE_OPENAI_API_KEY"] = "your_api_key"
-os.environ["AZURE_OPENAI_ENDPOINT"] = "https://your-endpoint.openai.azure.com/"
-os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"] = "your_deployment_name"  # 模型部署名称
+class CustomEmbeddingClient(Embeddings):
+    def __init__(self, api_url: str, api_key: str):
+        """
+        初始化自定义 Embedding Client。
 
-# 初始化 AzureChatOpenAI
-chat_model = AzureChatOpenAI(
-    openai_api_base=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    openai_api_version="2023-05-15",  # 确保使用最新版本
-    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-)
+        :param api_url: Embedding API 的 URL。
+        :param api_key: API 密钥。
+        """
+        self.api_url = api_url
+        self.api_key = api_key
 
-# 发送消息并获取响应
-response = chat_model([HumanMessage(content="Hello, how can I assist you today?")])
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """
+        对多个文档生成 Embedding。
 
-# 打印响应
-print(response.content)
+        :param texts: 需要生成 Embedding 的文本列表。
+        :return: Embedding 列表。
+        """
+        embeddings = []
+        for text in texts:
+            embedding = self._send_embedding_request(text)
+            embeddings.append(embedding)
+        return embeddings
+
+    def embed_query(self, text: str) -> List[float]:
+        """
+        对单个查询生成 Embedding。
+
+        :param text: 需要生成 Embedding 的文本。
+        :return: Embedding 向量。
+        """
+        return self._send_embedding_request(text)
+
+    def _send_embedding_request(self, text: str) -> List[float]:
+        """
+        发送 Embedding 请求并返回结果。
+
+        :param text: 需要生成 Embedding 的文本。
+        :return: Embedding 向量。
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        data = {
+            "input": text,
+            "model": "your-embedding-model"  # 替换为你的 Embedding 模型名称
+        }
+        response = requests.post(self.api_url, headers=headers, json=data)
+        if response.status_code == 200:
+            return response.json()["data"][0]["embedding"]  # 根据 API 返回格式调整
+        else:
+            raise Exception(f"Embedding request failed: {response.status_code}, {response.text}")
+
+# 使用示例
+if __name__ == "__main__":
+    # 初始化自定义 Embedding Client
+    api_url = "https://api.example.com/embeddings"  # 替换为你的 Embedding API URL
+    api_key = "your-api-key"  # 替换为你的 API 密钥
+    embedding_client = CustomEmbeddingClient(api_url, api_key)
+
+    # 生成单个查询的 Embedding
+    query_embedding = embedding_client.embed_query("Hello, world!")
+    print("Query Embedding:", query_embedding)
+
+    # 生成多个文档的 Embedding
+    document_embeddings = embedding_client.embed_documents(["Text 1", "Text 2", "Text 3"])
+    print("Document Embeddings:", document_embeddings)
