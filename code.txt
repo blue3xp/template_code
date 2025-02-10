@@ -1,102 +1,53 @@
-import argparse
-from antlr4 import *
-from antlr4.TokenStreamRewriter import TokenStreamRewriter
-
-# 假设已通过ANTLR生成Kotlin语法解析器
-# 请确保以下导入路径与实际生成的Kotlin语法解析器匹配
+from antlr4 import FileStream, CommonTokenStream
 from KotlinLexer import KotlinLexer
 from KotlinParser import KotlinParser
-from KotlinParserListener import KotlinParserListener
+from KotlinParserVisitor import KotlinParserVisitor
 
-class FunctionModifierListener(KotlinParserListener):
-    def __init__(self, function_name, rewriter, new_code, insert_at_start):
-        self.function_name = function_name
-        self.rewriter = rewriter
-        self.new_code = new_code
-        self.insert_at_start = insert_at_start
-        self.found = False
+class FunctionVisitor(KotlinParserVisitor):
+    def __init__(self, target_function_name):
+        self.target_name = target_function_name
+        self.result = None
 
-    def enterFunctionDeclaration(self, ctx: KotlinParser.FunctionDeclarationContext):
-        # 提取函数标识符
-        identifier = ctx.simpleIdentifier().getText()
-        if identifier == self.function_name:
-            # 获取函数体块结构
+    def visitFunctionDeclaration(self, ctx: KotlinParser.FunctionDeclarationContext):
+        # 提取函数名并比较
+        function_name = ctx.simpleIdentifier().getText()
+        if function_name == self.target_name:
+            # 检查是否存在包含花括号的函数体
             function_body = ctx.functionBody()
-            if function_body and function_body.block():
+            if function_body:
                 block = function_body.block()
-                lbrace = block.LBRACE().symbol
-                rbrace = block.RBRACE().symbol
+                if block:
+                    # 获取花括号的行号
+                    start_line = block.start.line
+                    end_line = block.stop.line
+                    if self.result is None:
+                        self.result = (start_line, end_line)
+        # 递归访问子节点以确保遍历整个树
+        return self.visitChildren(ctx)
 
-                # 根据插入位置操作Token流
-                if self.insert_at_start:
-                    self.rewriter.insertAfter(lbrace, f'\n{self.new_code}')
-                else:
-                    self.rewriter.insertBefore(rbrace, f'\n{self.new_code}')
-                
-                self.found = True
-
-def modify_kotlin_function(
-    file_path: str,
-    function_name: str,
-    new_code: str,
-    insert_at_start: bool = True
-) -> None:
-    """
-    修改指定Kotlin文件中的函数代码
-    
-    :param file_path: Kotlin文件路径
-    :param function_name: 目标函数名
-    :param new_code: 要插入的新代码（需包含正确缩进）
-    :param insert_at_start: True=在函数开头插入，False=在结尾插入
-    """
-    # 读取文件内容
+def get_function_brace_lines(file_path: str, function_name: str) -> tuple:
+    # 读取文件并解析
     input_stream = FileStream(file_path, encoding='utf-8')
-    
-    # 初始化词法分析和语法分析
     lexer = KotlinLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = KotlinParser(token_stream)
-    parse_tree = parser.kotlinFile()
-    
-    # 创建代码重写工具
-    rewriter = TokenStreamRewriter(token_stream)
-    
-    # 创建自定义监听器
-    listener = FunctionModifierListener(
-        function_name=function_name,
-        rewriter=rewriter,
-        new_code=new_code,
-        insert_at_start=insert_at_start
-    )
-    
-    # 遍历语法树
-    walker = ParseTreeWalker()
-    walker.walk(listener, parse_tree)
-    
-    if not listener.found:
-        raise ValueError(f"Function '{function_name}' not found or has no block body")
-    
-    # 应用修改并写回文件
-    modified_code = rewriter.getText('default', 0, token_stream.size)
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(modified_code)
+    tree = parser.kotlinFile()  # 解析Kotlin文件
 
+    visitor = FunctionVisitor(function_name)
+    visitor.visit(tree)
+
+    if visitor.result is not None:
+        return visitor.result
+    else:
+        raise ValueError(
+            f"函数 '{function_name}' 未找到或没有包含花括号的函数体。"
+        )
+
+# 示例用法
 if __name__ == "__main__":
-    # 命令行参数解析
-    parser = argparse.ArgumentParser()
-    parser.add_argument("file", help="Kotlin文件路径")
-    parser.add_argument("function", help="目标函数名")
-    parser.add_argument("code", help="要插入的代码内容")
-    parser.add_argument("--position", choices=["start", "end"], default="start",
-                        help="插入位置：start（开头）或 end（结尾）")
-    
-    args = parser.parse_args()
-    
-    # 执行修改操作
-    modify_kotlin_function(
-        file_path=args.file,
-        function_name=args.function,
-        new_code=args.code,
-        insert_at_start=(args.position == "start")
-    )
-    print(f"代码已成功插入到函数 {args.function} 的{args.position}位置")
+    try:
+        # 替换为实际文件路径和函数名
+        lines = get_function_brace_lines("demo.kt", "exampleFunction")
+        print(f"起始行: {lines[0]}, 结束行: {lines[1]}")
+    except ValueError as e:
+        print(e)
