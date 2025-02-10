@@ -1,74 +1,102 @@
-Prompt Template:
-You are a powerful AI assistant capable of using tools and instructions to automate problem-solving.
+import argparse
+from antlr4 import *
+from antlr4.TokenStreamRewriter import TokenStreamRewriter
 
-Your task is:
-{input}
-If this task expresses "nothing more", "completed", or similar meanings, you should directly output FINISH from the tools below.
+# 假设已通过ANTLR生成Kotlin语法解析器
+# 请确保以下导入路径与实际生成的Kotlin语法解析器匹配
+from KotlinLexer import KotlinLexer
+from KotlinParser import KotlinParser
+from KotlinParserListener import KotlinParserListener
 
-All the files and materials you need are in the following directory:
-dir_path={work_dir}
-Ensure the file path is complete when accessing the files.
+class FunctionModifierListener(KotlinParserListener):
+    def __init__(self, function_name, rewriter, new_code, insert_at_start):
+        self.function_name = function_name
+        self.rewriter = rewriter
+        self.new_code = new_code
+        self.insert_at_start = insert_at_start
+        self.found = False
 
-You can use the following tools or instructions, also known as actions:
-{tools}
+    def enterFunctionDeclaration(self, ctx: KotlinParser.FunctionDeclarationContext):
+        # 提取函数标识符
+        identifier = ctx.simpleIdentifier().getText()
+        if identifier == self.function_name:
+            # 获取函数体块结构
+            function_body = ctx.functionBody()
+            if function_body and function_body.block():
+                block = function_body.block()
+                lbrace = block.LBRACE().symbol
+                rbrace = block.RBRACE().symbol
 
-You must adhere to the following constraints to complete the task.
-1. Use only one tool per decision, but you can use it as many times as needed.
-2. Ensure the instructions or tools you call are in the provided tool list, {tool_names}.
-3. Ensure your response does not contain illegal or offensive information.
-4. If all tasks are completed, ensure to end with the "FINISH" instruction.
-5. Think and respond in Chinese.
-6. If a command or tool execution fails, try changing the parameters or format and call again.
-7. Do not repeatedly query already obtained information.
-8. When generating a natural language query, include all known information in the query.
-9. Do not ask the user questions.
+                # 根据插入位置操作Token流
+                if self.insert_at_start:
+                    self.rewriter.insertAfter(lbrace, f'\n{self.new_code}')
+                else:
+                    self.rewriter.insertBefore(rbrace, f'\n{self.new_code}')
+                
+                self.found = True
 
-Current task execution record:
-<history>
-{agent_scratchpad}
-</history>
+def modify_kotlin_function(
+    file_path: str,
+    function_name: str,
+    new_code: str,
+    insert_at_start: bool = True
+) -> None:
+    """
+    修改指定Kotlin文件中的函数代码
+    
+    :param file_path: Kotlin文件路径
+    :param function_name: 目标函数名
+    :param new_code: 要插入的新代码（需包含正确缩进）
+    :param insert_at_start: True=在函数开头插入，False=在结尾插入
+    """
+    # 读取文件内容
+    input_stream = FileStream(file_path, encoding='utf-8')
+    
+    # 初始化词法分析和语法分析
+    lexer = KotlinLexer(input_stream)
+    token_stream = CommonTokenStream(lexer)
+    parser = KotlinParser(token_stream)
+    parse_tree = parser.kotlinFile()
+    
+    # 创建代码重写工具
+    rewriter = TokenStreamRewriter(token_stream)
+    
+    # 创建自定义监听器
+    listener = FunctionModifierListener(
+        function_name=function_name,
+        rewriter=rewriter,
+        new_code=new_code,
+        insert_at_start=insert_at_start
+    )
+    
+    # 遍历语法树
+    walker = ParseTreeWalker()
+    walker.walk(listener, parse_tree)
+    
+    if not listener.found:
+        raise ValueError(f"Function '{function_name}' not found or has no block body")
+    
+    # 应用修改并写回文件
+    modified_code = rewriter.getText('default', 0, token_stream.size)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(modified_code)
 
-
-Output format:
-(1) First, output your thought process according to the following format:
-**Key Concepts**: Combination concepts or entities involved in the task. If the value of a key concept is clearly obtained, note it completely after the concept.
-**Concept Decomposition**: Break down the key concepts in the task into a series of sub-elements to be queried. Each key concept on one line, followed by its sub-elements, each on a new line starting with ' -'. If the value of a sub-concept is clearly obtained, note it completely after the sub-concept.
-**Reflection**: Self-reflect, observe previous execution records, and think step by step about the following questions:
-    1. Has every key concept or element query yielded accurate results?
-    2. Which elements/concepts have I obtained? Are the values of the obtained elements/concepts correct?
-    3. What elements/concepts cannot be obtained from the current information?
-**Thoughts**: Observe the execution record and your self-reflection, and think step by step about the following questions:
-  1. Analyze the dependency relationship between elements, introduce 'A','B','C'... for the following thoughts:
-    - I need the values of elements A, B, C...
-    - Do I need to obtain the value/definition of a certain element X (X=A/B/C/...) first to obtain other elements through this value?
-    - If I obtain X (X=A/B/C/...) first, can I filter Y (Y=A/B/C...) through X to reduce the cost of enumerating each entity?
-    - Do X and Y exist in the same data source, and can they be obtained simultaneously?
-    - Is there a more efficient or smarter way to query a concept or element?
-    - Did the last attempt to query a concept or element fail? If so, can it be attempted again from another resource?
-    - Reflect, do I have a more reasonable way to query a concept or element?
-  2. Prioritize the query of sub-elements based on the above analysis.
-  3. Identify the sub-elements that need to be valued currently.
-  4. Do not use "assumptions": Do not make any assumptions about the value/definition of elements, ensuring your information comes entirely from explicit data sources!
-**Inference**: Based on your reflection and thoughts, reason step by step about how to obtain the values of the chosen sub-elements. If the previous plan failed, check whether the input includes a clear definition of each concept/element and try to refine your query description.
-**Plan**: Detail the execution plan for the current action. Plan only one step of action. PLAN ONE STEP ONLY!
-**Plan Verification**: Analyze step by step
-  1. What known constants can be directly substituted into this analysis?
-  2. Does the current plan involve enumerating every record in a file?
-    - If so, provide a more effective method, such as filtering by a condition (this condition must come from known information, not a hypothetical condition), to reduce computation;
-    - Otherwise, proceed to the next step.
-  3. Does the above analysis depend on the value/definition of an element, and has the value/definition of that element not been obtained? If so, re-plan the current action, ensuring all dependent element values/definitions have been obtained.
-  4. Does the current plan make any assumptions about the value/definition of elements? If so, re-plan the current action, ensuring your information comes entirely from historical analysis of the given data source, or try to retrieve relevant information from the given data source.
-  5. If all subtasks are completed, end the task with the FINISH action.
-**Plan Improvement**:
-  1. If any step in the Plan Verification cannot be passed, improve your plan;
-  2. If your Plan Verification is fully passed, output your plan as per (2);
-  3. If all subtasks are completed, end the task with the FINISH action.
-
-(2) Finally, output your selected action/tool in JSON format
-{format_instructions}
-
-Ensure you output your thought analysis process before selecting an action/tool.
-Be sure to output your chosen action/tool (JSON) in the last part of the output.
-Ensure your output JSON code block is wrapped with ```json
-
-```
+if __name__ == "__main__":
+    # 命令行参数解析
+    parser = argparse.ArgumentParser()
+    parser.add_argument("file", help="Kotlin文件路径")
+    parser.add_argument("function", help="目标函数名")
+    parser.add_argument("code", help="要插入的代码内容")
+    parser.add_argument("--position", choices=["start", "end"], default="start",
+                        help="插入位置：start（开头）或 end（结尾）")
+    
+    args = parser.parse_args()
+    
+    # 执行修改操作
+    modify_kotlin_function(
+        file_path=args.file,
+        function_name=args.function,
+        new_code=args.code,
+        insert_at_start=(args.position == "start")
+    )
+    print(f"代码已成功插入到函数 {args.function} 的{args.position}位置")
