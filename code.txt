@@ -1,53 +1,45 @@
-from antlr4 import FileStream, CommonTokenStream
-from KotlinLexer import KotlinLexer
-from KotlinParser import KotlinParser
-from KotlinParserVisitor import KotlinParserVisitor
+import json
 
-class FunctionVisitor(KotlinParserVisitor):
-    def __init__(self, target_function_name):
-        self.target_name = target_function_name
-        self.result = None
+def modify_json(file_path, attribute_path, new_value):
+    """
+    修改JSON文件中指定嵌套属性的值
+    
+    :param file_path: JSON文件路径
+    :param attribute_path: 嵌套属性路径（用点号分隔，如'send.nav'）
+    :param new_value: 要设置的新值
+    :raises KeyError: 如果属性路径不存在
+    :raises TypeError: 如果中间节点不是字典类型
+    """
+    keys = attribute_path.split('.')
+    if len(keys) == 0:
+        raise ValueError("Attribute path cannot be empty")
 
-    def visitFunctionDeclaration(self, ctx: KotlinParser.FunctionDeclarationContext):
-        # 提取函数名并比较
-        function_name = ctx.simpleIdentifier().getText()
-        if function_name == self.target_name:
-            # 检查是否存在包含花括号的函数体
-            function_body = ctx.functionBody()
-            if function_body:
-                block = function_body.block()
-                if block:
-                    # 获取花括号的行号
-                    start_line = block.start.line
-                    end_line = block.stop.line
-                    if self.result is None:
-                        self.result = (start_line, end_line)
-        # 递归访问子节点以确保遍历整个树
-        return self.visitChildren(ctx)
+    # 读取JSON数据
+    with open(file_path, 'r') as f:
+        data = json.load(f)
 
-def get_function_brace_lines(file_path: str, function_name: str) -> tuple:
-    # 读取文件并解析
-    input_stream = FileStream(file_path, encoding='utf-8')
-    lexer = KotlinLexer(input_stream)
-    token_stream = CommonTokenStream(lexer)
-    parser = KotlinParser(token_stream)
-    tree = parser.kotlinFile()  # 解析Kotlin文件
+    current = data
+    # 遍历到目标属性的父级
+    for i, key in enumerate(keys[:-1]):
+        if not isinstance(current, dict):
+            raise TypeError(f"Expected dict at '{'.'.join(keys[:i+1])}' in path")
+        if key not in current:
+            raise KeyError(f"Key '{'.'.join(keys[:i+1])}' not found")
+        current = current[key]
 
-    visitor = FunctionVisitor(function_name)
-    visitor.visit(tree)
+    # 修改目标属性值
+    last_key = keys[-1]
+    if not isinstance(current, dict):
+        raise TypeError(f"Expected dict at '{'.'.join(keys[:-1])}' in path")
+    if last_key not in current:
+        raise KeyError(f"Key '{attribute_path}' not found")
+    current[last_key] = new_value
 
-    if visitor.result is not None:
-        return visitor.result
-    else:
-        raise ValueError(
-            f"函数 '{function_name}' 未找到或没有包含花括号的函数体。"
-        )
+    # 写回文件
+    with open(file_path, 'w') as f:
+        json.dump(data, f, indent=2)
 
-# 示例用法
+# 使用示例
 if __name__ == "__main__":
-    try:
-        # 替换为实际文件路径和函数名
-        lines = get_function_brace_lines("demo.kt", "exampleFunction")
-        print(f"起始行: {lines[0]}, 结束行: {lines[1]}")
-    except ValueError as e:
-        print(e)
+    # 示例：修改send.nav属性的值
+    modify_json('example.json', 'send.nav', [1, 2, 3])
